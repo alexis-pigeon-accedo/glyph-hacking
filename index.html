@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Glyph Hacker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #000;
+            font-family: 'Press Start 2P', monospace;
+            color: #00ff00;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+        #glyph-canvas {
+            border: 2px solid #00ff00;
+            margin-bottom: 20px;
+            touch-action: none; /* Prevent default touch behavior */
+        }
+        #controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        #feedback {
+            margin-bottom: 10px;
+            font-size: 0.8em;
+            min-height: 1em; /* Reserve space to avoid layout shift */
+            text-align: center;
+        }
+        #buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #00ff00;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.7em;
+            font-family: 'Press Start 2P', monospace;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #00b300;
+        }
+        #sequence-display {
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+            text-align: center;
+            min-height: 1em;
+        }
+        #timer-display {
+            font-size: 0.8em;
+            margin-bottom: 10px;
+            color: #ffff00;
+            min-height: 1em;
+        }
+        .hidden {
+            display: none;
+        }
+        #tutorial-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #00ff00;
+            z-index: 10;
+            text-align: center;
+            padding: 20px;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        #tutorial-overlay h2 {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        #tutorial-overlay p {
+            margin-bottom: 15px;
+        }
+        #tutorial-overlay ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+            text-align: left;
+        }
+        #tutorial-overlay li {
+            margin-bottom: 5px;
+        }
+        #tutorial-overlay button {
+            padding: 10px 20px;
+            background-color: #00ff00;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8em;
+            font-family: 'Press Start 2P', monospace;
+        }
+        .feedback-incorrect {
+            color: #ff0000;
+        }
+        .feedback-correct {
+            color: #00ff00;
+        }
+        .feedback-partial {
+            color: #ffff00;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glyph-canvas" width="300" height="300"></canvas>
+    <div id="controls">
+        <div id="sequence-display"></div>
+        <div id="timer-display"></div>
+        <div id="feedback"></div>
+        <div id="buttons">
+            <button id="new-sequence">New Sequence</button>
+            <button id="clear-canvas">Clear</button>
+            <button id="show-tutorial">Tutorial</button> </div>
+    </div>
+
+    <div id="tutorial-overlay" class="hidden">
+        <h2>How to Play</h2>
+        <p>Draw the glyph sequence shown as accurately as possible.  You can draw within the circle.</p>
+        <ul>
+            <li>A new sequence will be shown after you complete the current one.</li>
+            <li>Click "Clear" to reset your drawing.</li>
+            <li>Click "New Sequence" to skip the current glyph and get a new one.</li>
+        </ul>
+        <p>Good luck, Agent!</p>
+        <button id="close-tutorial">Got it!</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('glyph-canvas');
+        const ctx = canvas.getContext('2d');
+        const sequenceDisplay = document.getElementById('sequence-display');
+        const feedback = document.getElementById('feedback');
+        const newSequenceButton = document.getElementById('new-sequence');
+        const clearCanvasButton = document.getElementById('clear-canvas');
+        const showTutorialButton = document.getElementById('show-tutorial'); // Get the tutorial button
+        const tutorialOverlay = document.getElementById('tutorial-overlay'); // Get the tutorial overlay
+        const closeTutorialButton = document.getElementById('close-tutorial'); // Get the close button
+        const timerDisplay = document.getElementById('timer-display');
+
+        let currentSequence = [];
+        let playerDrawing = [];
+        let isDrawing = false;
+        let startTime;
+        let timerInterval;
+        let canvasScale = 1;
+
+        const glyphs = {
+            "create": [{ x: 0.5, y: 0 }, { x: 0.866, y: 0.5 }, { x: 0.5, y: 1 }, { x: 0.134, y: 0.5 }, { x: 0.5, y: 0 }],
+            "destroy": [{ x: 0.5, y: 0 }, { x: 0.134, y: 0.5 }, { x: 0.5, y: 1 }, { x: 0.866, y: 0.5 }, { x: 0.5, y: 0 }],
+            "portal": [{ x: 0.5, y: 0 }, { x: 0.866, y: 0.5 }, { x: 0.5, y: 1 }, { x: 0.134, y: 0.5 }, { x: 0.5, y: 0 }, { x: 0.866, y: 0.5 }],
+            "key": [{ x: 0.2, y: 0.2 }, { x: 0.8, y: 0.2 }, { x: 0.8, y: 0.8 }, { x: 0.5, y: 0.5 }, { x: 0.2, y: 0.8 }, { x: 0.2, y: 0.2 }],
+            "fire": [{ x: 0.5, y: 0 }, { x: 0.65, y: 0.35 }, { x: 1, y: 0.35 }, { x: 0.75, y: 0.6 }, { x: 0.8, y: 1 }, { x: 0.5, y: 0.75 }, { x: 0.2, y: 1 }, { x: 0.25, y: 0.6 }, { x: 0, y: 0.35 }, { x: 0.35, y: 0.35 }, { x: 0.5, y: 0 }],
+            "purify": [{ x: 0.5, y: 0 }, { x: 0.866, y: 0.5 }, { x: 0.5, y: 1 }, { x: 0.134, y: 0.5 }, { x: 0.5, y: 0 }, { x: 0.7, y: 0.3 }],
+            "chaos": [{ x: 0.5, y: 0.5 }, {x: 0.2, y: 0.2}, {x: 0.8, y: 0.2}, {x: 0.2, y: 0.8}, {x: 0.8, y: 0.8}, { x: 0.5, y: 0.5}],
+            "sustain": [{x: 0.2, y: 0.2}, {x: 0.8, y: 0.2}, {x: 0.8, y: 0.8}, {x: 0.2, y: 0.8}, {x: 0.2, y: 0.2}],
+        };
+
+        const glyphNames = Object.keys(glyphs);
+
+        function resizeCanvas() {
+            const containerWidth = document.documentElement.clientWidth;
+            const containerHeight = document.documentElement.clientHeight;
+            const size = Math.min(containerWidth, containerHeight) * 0.8; // Adjust multiplier for desired size
+            canvas.width = size;
+            canvas.height = size;
+            canvasScale = size / 300; // Calculate scale
+            drawGlyph(); // Redraw the current glyph
+            drawPlayerDrawing();
+        }
+
+        function drawGlyph(glyph) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (!glyph) return;
+
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 4 * canvasScale; // Scale line width
+            ctx.beginPath();
+
+            const startPoint = {
+                x: glyph[0].x * canvas.width,
+                y: glyph[0].y * canvas.height
+            };
+            ctx.moveTo(startPoint.x, startPoint.y);
+
+            for (let i = 1; i < glyph.length; i++) {
+                const point = {
+                    x: glyph[i].x * canvas.width,
+                    y: glyph[i].y * canvas.height
+                };
+                ctx.lineTo(point.x, point.y);
+            }
+            ctx.stroke();
+        }
+
+        function drawPlayerDrawing() {
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 2 * canvasScale;  // Scale line width
+            ctx.beginPath();
+
+            if (playerDrawing.length > 0) {
+                const startPoint = {
+                    x: playerDrawing[0].x * canvas.width,
+                    y: playerDrawing[0].y * canvas.height
+                };
+                ctx.moveTo(startPoint.x, startPoint.y);
+
+                for (let i = 1; i < playerDrawing.length; i++) {
+                    const point = {
+                        x: playerDrawing[i].x * canvas.width,
+                        y: playerDrawing[i].y * canvas.height
+                    };
+                    ctx.lineTo(point.x, point.y);
+                }
+                ctx.stroke();
+            }
+        }
+
+        function getTouchPos(canvasDom, touchEvent) {
+          const rect = canvasDom.getBoundingClientRect();
+          return {
+            x: touchEvent.touches[0].clientX - rect.left,
+            y: touchEvent.touches[0].clientY - rect.top
+          };
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const point = e.touches ? getTouchPos(canvas, e) : e;
+
+            playerDrawing.push({
+                x: point.x / canvas.width,
+                y: point.y / canvas.height
+            });
+            drawPlayerDrawing();
+            e.preventDefault();
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            const point = e.touches ? getTouchPos(canvas, e) : e;
+            playerDrawing.push({
+                x: point.x / canvas.width,
+                y: point.y / canvas.height
+            });
+            drawPlayerDrawing();
+            e.preventDefault();
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+            checkDrawing();
+            startTimer(); // Start the timer when drawing stops
+        }
+
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            playerDrawing = [];
+            feedback.textContent = '';
+            stopTimer();
+            timerDisplay.textContent = '';
+            generateSequence(); // Generate new sequence after clearing
+        }
+
+        function checkDrawing() {
+            if (currentSequence.length === 0) return;
+            const drawnGlyph = playerDrawing;
+            const targetGlyph = glyphs[currentSequence[0]];
+
+            if (!targetGlyph || drawnGlyph.length === 0) {
+                feedback.textContent = 'Incorrect. Try again.';
+                feedback.className = 'feedback-incorrect';
+                return;
+            }
+
+            let matches = 0;
+            const tolerance = 0.05; // Adjust tolerance as needed
+
+            // Compare points - simplified for demonstration
+            for (let i = 0; i < Math.min(targetGlyph.length, drawnGlyph.length); i++) {
+                if (
+                    Math.abs(targetGlyph[i].x - drawnGlyph[i].x) < tolerance &&
+                    Math.abs(targetGlyph[i].y - drawnGlyph[i].y) < tolerance
+                ) {
+                    matches++;
+                }
+            }
+
+            if (matches / targetGlyph.length >= 0.7) { // Require 70% match
+                feedback.textContent = 'Correct!';
+                feedback.className = 'feedback-correct';
+                currentSequence.shift(); // Remove the first glyph in the sequence
+                playerDrawing = []; // Clear drawing
+                stopTimer();
+                timerDisplay.textContent = '';
+                if (currentSequence.length > 0) {
+                    drawGlyph(glyphs[currentSequence[0]]); // Draw the next glyph
+                    sequenceDisplay.textContent = `Draw: ${currentSequence.join(' → ')}`;
+                    startTimer(); //restart timer
+                } else {
+                    sequenceDisplay.textContent = 'Sequence Complete!';
+                    generateSequence(); // Generate the next sequence
+                }
+            } else if (matches > 0) {
+                feedback.textContent = 'Partial match, try again.';
+                feedback.className = 'feedback-partial';
+            }
+             else {
+                feedback.textContent = 'Incorrect. Try again.';
+                feedback.className = 'feedback-incorrect';
+            }
+            playerDrawing = [];
+            drawPlayerDrawing(); //clear
+        }
+
+        function generateSequence() {
+            currentSequence = [];
+            const sequenceLength = Math.floor(Math.random() * 3) + 1; // Random length between 1 and 4
+            for (let i = 0; i < sequenceLength; i++) {
+                const randomIndex = Math.floor(Math.random() * glyphNames.length);
+                currentSequence.push(glyphNames[randomIndex]);
+            }
+            sequenceDisplay.textContent = `Draw: ${currentSequence.join(' → ')}`;
+            drawGlyph(glyphs[currentSequence[0]]);
+        }
+
+        function startTimer() {
+            startTime = new Date();
+            timerInterval = setInterval(updateTimer, 100);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
+        function updateTimer() {
+            const now = new Date();
+            const timeDiff = now.getTime() - startTime.getTime();
+            const seconds = Math.floor(timeDiff / 1000);
+            const milliseconds = Math.floor((timeDiff % 1000) / 100); // Display tenths of a second
+
+            timerDisplay.textContent = `Time: ${seconds}.${milliseconds}s`;
+        }
+
+        // Event Listeners
+        canvas.addEventListener('touchstart', startDrawing, { passive: false });
+        canvas.addEventListener('touchmove', draw, { passive: false });
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        clearCanvasButton.addEventListener('click', clearCanvas);
+        newSequenceButton.addEventListener('click', generateSequence);
+        showTutorialButton.addEventListener('click', () => { // Show tutorial
+            tutorialOverlay.classList.remove('hidden');
+        });
+        closeTutorialButton.addEventListener('click', () => { // Close tutorial
+            tutorialOverlay.classList.add('hidden');
+        });
+
+        // Initial setup
+        resizeCanvas();
+        generateSequence();
+        window.addEventListener('resize', resizeCanvas);
+    </script>
+</body>
+</html>
